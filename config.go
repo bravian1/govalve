@@ -1,6 +1,8 @@
 package govalve
 
 import (
+	"fmt"
+
 	"golang.org/x/time/rate"
 )
 
@@ -12,6 +14,20 @@ type limiterConfig struct {
 	rateLimiterSize *rate.Limiter
 
 	isDedicated bool
-	sharedKey string
+	sharedKey   string
 }
 
+// WithWorkerPool sets the number of concurrent workers and the size of the task queue.
+func WithWorkerPool(size, queueSize int) Option {
+	return func(c *limiterConfig) error {
+		if size <= 0 {
+			return fmt.Errorf("worker pool size must be greater than 0")
+		}
+		if queueSize <= 0 {
+			return fmt.Errorf("queue size must be greater than 0")
+		}
+		c.workerPoolSize = size
+		c.queueSize = queueSize
+		return nil
+	}
+}
