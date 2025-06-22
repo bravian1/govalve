@@ -31,3 +31,16 @@ func WithWorkerPool(size, queueSize int) Option {
 		return nil
 	}
 }
+
+// WithSharedResource sets up a shared resource with a rate limiter.
+func WithSharedResource(key string, limit rate.Limit) Option {
+	return func(c *limiterConfig) error {
+		if key == "" {
+			return fmt.Errorf("shared resource key cannot be empty")
+		}
+		c.isDedicated = false
+		c.sharedKey = key
+		c.rateLimiterSize = rate.NewLimiter(limit, int)
+		return nil
+	}
+}
