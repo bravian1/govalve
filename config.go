@@ -40,7 +40,16 @@ func WithSharedResource(key string, limit rate.Limit) Option {
 		}
 		c.isDedicated = false
 		c.sharedKey = key
-		c.rateLimiterSize = rate.NewLimiter(limit, int)
+		c.rateLimiterSize = rate.NewLimiter(limit, int(limit))
+		return nil
+	}
+}
+
+// WithDedicatedResource sets up a dedicated resource with a rate limiter.
+func WithDedicatedResource(limit rate.Limit) Option {
+	return func(c *limiterConfig) error {
+		c.isDedicated = true
+		c.rateLimiterSize = rate.NewLimiter(limit, int(limit))
 		return nil
 	}
 }
