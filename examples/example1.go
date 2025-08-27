@@ -41,7 +41,7 @@ func mainSimpleShared() {
 		govalve.WithWorkerPool(8, 100),
 	)
 
-	limiter, _ := manager.GetLimiter("shared-service", "") // User ID doesn't matter for getting the same shared limiter
+	limiter, _ := manager.GetLimiterForProfile(appCtx, "shared-service", "shared-user")
 
 	var wg sync.WaitGroup
 	for i := range 3 { // 3 users
@@ -69,8 +69,8 @@ func mainSharedAndDedicated() {
 	manager.RegisterProfile("free-tier", govalve.WithSharedResource("free-key", rate.Limit(2)), govalve.WithWorkerPool(5, 100))
 	manager.RegisterProfile("premium-tier", govalve.WithDedicatedResource(rate.Limit(10)), govalve.WithWorkerPool(10, 100))
 
-	freeLimiter, _ := manager.GetLimiter("free-tier", "")
-	premiumLimiter, _ := manager.GetLimiter("premium-tier", "premium-user-007")
+	freeLimiter, _ := manager.GetLimiterForProfile(appCtx, "free-tier", "free-user")
+	premiumLimiter, _ := manager.GetLimiterForProfile(appCtx, "premium-tier", "premium-user-007")
 
 	fmt.Println("Submitting 8 tasks to free tier (2/sec) and 20 tasks to premium (10/sec)...")
 	for i := range 20 {
@@ -102,7 +102,7 @@ func mainResourcePooling() {
 		govalve.WithSharedResource("my-key-pool", rate.Limit(5)),
 		govalve.WithWorkerPool(10, 100),
 	)
-	limiter, _ := manager.GetLimiter("key-pool-limiter", "")
+	limiter, _ := manager.GetLimiterForProfile(appCtx, "key-pool-limiter", "pool-user")
 
 	// Your application's key pool, managed outside the library.
 	apiKeyPool := make(chan string, 3)
@@ -139,7 +139,7 @@ func mainGracefulShutdown() {
 	manager := govalve.NewManager(appCtx)
 
 	manager.RegisterProfile("long-tasks", govalve.WithSharedResource("long-running", rate.Limit(5)), govalve.WithWorkerPool(5, 5))
-	limiter, _ := manager.GetLimiter("long-tasks", "")
+	limiter, _ := manager.GetLimiterForProfile(appCtx, "long-tasks", "shutdown-user")
 
 	var wg sync.WaitGroup
 	fmt.Println("Submitting 10 long-running tasks...")
@@ -172,7 +172,7 @@ func mainRequestContextTimeout() {
 
 	// A very busy limiter with a full queue to force submission blocking
 	manager.RegisterProfile("busy-limiter", govalve.WithSharedResource("busy", rate.Limit(2)), govalve.WithWorkerPool(1, 1))
-	limiter, _ := manager.GetLimiter("busy-limiter", "")
+	limiter, _ := manager.GetLimiterForProfile(appCtx, "busy-limiter", "timeout-user")
 	var wg sync.WaitGroup
 
 	// Fill the worker and the queue
