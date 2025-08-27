@@ -12,6 +12,7 @@ type limiterConfig struct {
 	workerPoolSize  int
 	queueSize       int
 	rateLimiterSize *rate.Limiter
+	usageQuota      int64
 
 	isDedicated bool
 	sharedKey   string
@@ -50,6 +51,17 @@ func WithDedicatedResource(limit rate.Limit) Option {
 	return func(c *limiterConfig) error {
 		c.isDedicated = true
 		c.rateLimiterSize = rate.NewLimiter(limit, int(limit))
+		return nil
+	}
+}
+
+// WithUsageQuota sets the usage quota for a subscription.
+func WithUsageQuota(quota int64) Option {
+	return func(c *limiterConfig) error {
+		if quota <= 0 {
+			return fmt.Errorf("usage quota must be greater than 0")
+		}
+		c.usageQuota = quota
 		return nil
 	}
 }
