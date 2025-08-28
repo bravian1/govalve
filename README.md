@@ -71,64 +71,17 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// MockStore is an in-memory implementation of the govalve.Store interface for demonstration purposes.
-type MockStore struct {
-	subscriptions map[string]*govalve.Subscription
-	mu            sync.RWMutex
-}
-
-// NewMockStore creates a new MockStore.
-func NewMockStore() *MockStore {
-	return &MockStore{
-		subscriptions: make(map[string]*govalve.Subscription),
-	}
-}
-
-// GetSubscription retrieves a subscription from the in-memory store.
-func (s *MockStore) GetSubscription(ctx context.Context, userID string) (*govalve.Subscription, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	sub, ok := s.subscriptions[userID]
-	if !ok {
-		return nil, fmt.Errorf("subscription not found for user %s", userID)
-	}
-
-	return sub, nil
-}
-
-// SaveSubscription saves a subscription to the in-memory store.
-func (s *MockStore) SaveSubscription(ctx context.Context, sub *govalve.Subscription) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.subscriptions[sub.UserID] = sub
-	return nil
-}
-
-// CheckAndIncrementUsage checks quota and increments usage atomically.
-func (s *MockStore) CheckAndIncrementUsage(ctx context.Context, userID string, quota int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sub, ok := s.subscriptions[userID]
-	if !ok {
-		return fmt.Errorf("subscription not found for user %s", userID)
-	}
-	if quota > 0 && sub.Usage >= quota {
-		return fmt.Errorf("usage quota exceeded")
-	}
-	sub.Usage++
-	return nil
-}
-
 func main() {
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 
-	// 1. Create a new MockStore.
-	store := NewMockStore()
+	// 1. Create a new InMemoryStore.
+	// Govalve provides an in-memory store for demonstration and testing purposes.
+	// For production use, you should implement the govalve.Store interface
+	// with a persistent store like Redis or PostgreSQL.
+	store := govalve.NewInMemoryStore()
 
-	// 2. Create a new Manager with the MockStore.
+	// 2. Create a new Manager with the InMemoryStore.
 	manager := govalve.NewManager(appCtx, govalve.WithStore(store))
 	defer manager.Shutdown()
 
