@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generative Art with Voice Recorder</title>
+    <!-- p5.js core library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <!-- p5.js sound library for audio processing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+    <style>
+        /* Basic styling for the page */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+                Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #111;
+            color: #fff;
+        }
+        /* Center the canvas and button */
+        main {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        /* Styling for the record button */
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #f44336; /* Red for recording */
+            color: white;
+            border: none;
+            border-radius: 8px;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            background-color: #d32f2f;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        /* Style for when recording is active */
+        button.recording {
+            background-color: #4CAF50; /* Green for stop */
+        }
+        button.recording:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <!-- The p5.js canvas will be created here -->
+        <div id="canvas-container"></div>
+        <!-- Button to control recording -->
+        <button id="record-button">Start Recording</button>
+    </main>
+
+    <script>
+        // Global variables
+        let t = 0;
+        let mic, recorder, soundFile;
+        let isRecording = false;
+
+        function setup() {
+            // Create the canvas and place it inside the container div
+            let canvas = createCanvas(800, 800, WEBGL);
+            canvas.parent('canvas-container');
+
+            noFill();
+            colorMode(RGB, 255);
+
+            // --- Audio Setup ---
+            // Create an Audio input
+            // The user will need to allow microphone access in the browser
+            mic = new p5.AudioIn();
+
+            // Create a new sound recorder
+            recorder = new p5.SoundRecorder();
+
+            // Create an empty sound file that we will use to save the recording
+            soundFile = new p5.SoundFile();
+
+            // --- Button Logic ---
+            const recordButton = document.getElementById('record-button');
+            recordButton.addEventListener('click', toggleRecording);
+        }
+
+        function toggleRecording() {
+            const recordButton = document.getElementById('record-button');
+            // Make sure the user has allowed mic access
+            if (getAudioContext().state !== 'running') {
+                getAudioContext().resume();
+            }
+
+            if (!isRecording) {
+                // Start the microphone
+                mic.start();
+                // Connect the mic to the recorder
+                recorder.setInput(mic);
+                // Start recording
+                recorder.record(soundFile);
+
+                // Update UI
+                recordButton.textContent = 'Stop & Save Recording';
+                recordButton.classList.add('recording');
+                isRecording = true;
+            } else {
+                // Stop recording
+                recorder.stop();
+                // Stop the microphone
+                mic.stop();
+
+                // Save the recorded audio to a .wav file
+                // This will trigger a download in the browser
+                save(soundFile, 'my-recording.wav');
+
+                // Update UI
+                recordButton.textContent = 'Start Recording';
+                recordButton.classList.remove('recording');
+                isRecording = false;
+            }
+        }
+
+        function draw() {
+            background(0, 20);
+
+            // Get the volume (amplitude) from the microphone
+            // It's a value between 0 and 1.0
+            let micLevel = 0;
+            if (isRecording) {
+                 micLevel = mic.getLevel();
+            }
+
+            // Map the mic level to the stroke weight for a cool visual effect
+            // When quiet, stroke is 1. When loud, it can go up to 10.
+            let sw = map(micLevel, 0, 0.5, 1, 10, true);
+            strokeWeight(sw);
+
+            // --- Your Original Visual Code ---
+            rotateY(t * 0.3);
+            rotateX(t * 0.2);
+            t += 0.03;
+
+            for (let x = -200; x <= 200; x += 20) {
+                for (let y = -200; y <= 200; y += 20) {
+                    for (let z = -200; z <= 200; z += 20) {
+                        let k = x / 4 - 12.5;
+                        let e = y / 9;
+                        let o = sqrt(k * k + e * e + z * z) / 9;
+                        let q = x / 3 + 99 + (3 / (k !== 0 ? k : 1)) * sin(y) + k * (1 + cos(y) / 3 + sin(e + o * 4 - t * 2));
+                        let theta = o / 5 + e / 4 - t / 8;
+                        let R = q;
+                        let X = R * sin(theta) * cos(z * 0.01 + t);
+                        let Y = R * sin(theta) * sin(z * 0.01 + t);
+                        let Z = R * cos(theta);
+                        let rCol = 128 + 127 * sin(x * 0.05 + t);
+                        let gCol = 128 + 127 * cos(y * 0.05 - t);
+                        let bCol = 200;
+                        stroke(rCol, gCol, bCol);
+                        point(X, Y, Z);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
