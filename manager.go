@@ -15,6 +15,9 @@ type Manager struct {
 	profiles map[string]*limiterConfig
 	limiters sync.Map
 	store    Store
+	metrics  Metrics
+	retryConfig RetryConfig
+	deadLetterQueue DeadLetterQueue
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -35,6 +38,20 @@ func WithStore(store Store) ManagerOption {
 	}
 }
 
+// WithRetryConfig configures retry behavior for store operations.
+func WithRetryConfig(config RetryConfig) ManagerOption {
+	return func(m *Manager) {
+		m.retryConfig = config
+	}
+}
+
+// WithDeadLetterQueue configures dead letter queue for failed tasks.
+func WithDeadLetterQueue(dlq DeadLetterQueue) ManagerOption {
+	return func(m *Manager) {
+		m.deadLetterQueue = dlq
+	}
+}
+
 // NewManager creates a new Manager.
 // It takes a context and a list of ManagerOptions.
 // The context is used to gracefully shut down the Manager and all its limiters.
@@ -44,6 +61,7 @@ func NewManager(ctx context.Context, opts ...ManagerOption) *Manager {
 		profiles: make(map[string]*limiterConfig),
 		ctx:      managerCtx,
 		cancel:   cancel,
+		retryConfig: DefaultRetryConfig(),
 	}
 
 	for _, opt := range opts {
@@ -102,10 +120,14 @@ func (m *Manager) Subscribe(ctx context.Context, userID, profileName string, dur
 		Usage:       0,
 	}
 
-	if err := m.store.SaveSubscription(ctx, sub); err != nil {
+	err := WithRetry(ctx, m.retryConfig, func() error {
+		return m.store.SaveSubscription(ctx, sub)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to save subscription: %w", err)
 	}
 
+	m.recordSubscriptionEvent(userID, profileName, "created")
 	return sub, nil
 }
 
@@ -115,6 +137,78 @@ func (m *Manager) GetSubscription(ctx context.Context, userID string) (*Subscrip
 		return nil, fmt.Errorf("store is not configured")
 	}
 	return m.store.GetSubscription(ctx, userID)
+}
+
+// ExtendSubscription extends a user's subscription by the given duration.
+func (m *Manager) ExtendSubscription(ctx context.Context, userID string, duration time.Duration) error {
+	if m.store == nil {
+		return fmt.Errorf("store is not configured")
+	}
+
+	sub, err := m.store.GetSubscription(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	sub.EndDate = sub.EndDate.Add(duration)
+	err = m.store.SaveSubscription(ctx, sub)
+	if err == nil {
+		m.recordSubscriptionEvent(userID, sub.ProfileName, "extended")
+	}
+	return err
+}
+
+// CancelSubscription cancels a user's subscription.
+func (m *Manager) CancelSubscription(ctx context.Context, userID string) error {
+	if m.store == nil {
+		return fmt.Errorf("store is not configured")
+	}
+
+	sub, err := m.store.GetSubscription(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	sub.Status = SubscriptionStatusCanceled
+	err = m.store.SaveSubscription(ctx, sub)
+	if err == nil {
+		m.recordSubscriptionEvent(userID, sub.ProfileName, "canceled")
+	}
+	return err
+}
+
+// ResetUsage resets a user's usage counter to zero.
+func (m *Manager) ResetUsage(ctx context.Context, userID string) error {
+	if m.store == nil {
+		return fmt.Errorf("store is not configured")
+	}
+
+	sub, err := m.store.GetSubscription(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	sub.Usage = 0
+	return m.store.SaveSubscription(ctx, sub)
+}
+
+// UpdateSubscriptionQuota changes a user's individual quota.
+func (m *Manager) UpdateSubscriptionQuota(ctx context.Context, userID string, newQuota int64) error {
+	if m.store == nil {
+		return fmt.Errorf("store is not configured")
+	}
+
+	sub, err := m.store.GetSubscription(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get subscription: %w", err)
+	}
+
+	sub.Quota = newQuota
+	err = m.store.SaveSubscription(ctx, sub)
+	if err == nil {
+		m.recordSubscriptionEvent(userID, sub.ProfileName, "quota_updated")
+	}
+	return err
 }
 
 // GetLimiter returns a limiter for a user.

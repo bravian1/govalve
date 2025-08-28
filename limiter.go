@@ -43,7 +43,7 @@ type limiterFunc struct {
 	wg          sync.WaitGroup
 	rateLimiter *rate.Limiter
 	closeOnce   sync.Once
-	mu 		sync.Mutex
+	mu 		sync.RWMutex
 	isClosed	bool
 
 	ctx    context.Context
@@ -84,14 +84,6 @@ func newLimiter(ctx context.Context, config *limiterConfig, manager *Manager, us
 // Submit submits a task to the limiter.
 // It is the implementation of the Submit method of the Limiter interface.
 func (l *limiterFunc) Submit(ctx context.Context, task Task) error {
-	l.mu.Lock()
-
-	if l.isClosed {
-		l.mu.Unlock()
-		return fmt.Errorf("limiter is closed")
-	}
-	l.mu.Unlock()
-
 	// If a store is configured, check and increment the subscription's usage.
 	if l.manager != nil && l.manager.store != nil {
 		sub, err := l.manager.GetSubscription(ctx, l.userID)
@@ -111,22 +103,57 @@ func (l *limiterFunc) Submit(ctx context.Context, task Task) error {
 			return fmt.Errorf("profile '%s' not found", sub.ProfileName)
 		}
 
-		err = l.manager.store.CheckAndIncrementUsage(ctx, l.userID, profile.usageQuota)
+		// Use per-user quota if set, otherwise use profile default
+		quota := sub.Quota
+		if quota == 0 {
+			quota = profile.usageQuota
+		}
+
+		err = l.manager.store.CheckAndIncrementUsage(ctx, l.userID, quota)
 		if err != nil {
 			return err
 		}
 	}
 
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if l.isClosed {
+		return fmt.Errorf("limiter is closed")
+	}
+
 	// Submit the task to the task queue.
 	// It blocks until the task is submitted or the context is canceled.
+	start := time.Now()
+	var submitErr error
+
 	select {
 	case l.taskQueue <- task:
-		return nil
+		// Task submitted successfully
 	case <-ctx.Done():
-		return fmt.Errorf("failed to submit task: %w", ctx.Err())
+		submitErr = fmt.Errorf("failed to submit task: %w", ctx.Err())
 	case <-l.ctx.Done():
-		return fmt.Errorf("failed to submit task: limiter is shutting down")
+		submitErr = fmt.Errorf("failed to submit task: limiter is shutting down")
 	}
+
+	// Record metrics
+	if l.manager != nil && l.manager.store != nil {
+		if sub, err := l.manager.GetSubscription(ctx, l.userID); err == nil {
+			duration := time.Since(start)
+			l.manager.recordTaskSubmission(l.userID, sub.ProfileName, submitErr == nil, duration)
+
+			// Record usage metrics
+			quota := sub.Quota
+			if quota == 0 {
+				if profile, ok := l.manager.profiles[sub.ProfileName]; ok {
+					quota = profile.usageQuota
+				}
+			}
+			l.manager.recordUsageQuota(l.userID, sub.ProfileName, sub.Usage, quota)
+		}
+	}
+
+	return submitErr
 }
 
 // startWorkers starts the worker pool.
@@ -150,8 +177,25 @@ func (l *limiterFunc) startWorkers(workerCount int) {
 						return
 					}
 
-					// Execute the task.
-					task()
+					// Execute the task with error handling.
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								// Handle task panic
+								if l.manager != nil && l.manager.deadLetterQueue != nil {
+									failedTask := &FailedTask{
+										Task:      task,
+										UserID:    l.userID,
+										Error:     fmt.Errorf("task panic: %v", r),
+										Timestamp: time.Now(),
+										Attempts:  1,
+									}
+									l.manager.deadLetterQueue.Add(l.ctx, failedTask)
+								}
+							}
+						}()
+						task()
+					}()
 
 				case <-l.ctx.Done():
 					return
@@ -168,8 +212,12 @@ func (l *limiterFunc) startWorkers(workerCount int) {
 func (l *limiterFunc) Close() {
 	l.closeOnce.Do(func() {
 		l.mu.Lock()
+		defer l.mu.Unlock()
+
+		if l.isClosed {
+			return
+		}
 		l.isClosed = true
-		l.mu.Unlock()
 
 		close(l.taskQueue)
 		l.wg.Wait()

@@ -22,4 +22,5 @@ type Subscription struct {
 	StartDate   time.Time
 	EndDate     time.Time
 	Usage       int64
+	Quota       int64 // Per-user quota override, 0 means use profile default
 }
