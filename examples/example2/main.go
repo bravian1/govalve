@@ -61,6 +61,18 @@ func (s *MockStore) CheckAndIncrementUsage(ctx context.Context, userID string, q
 	return nil
 }
 
+// ResetUsage resets a user's usage counter to zero.
+func (s *MockStore) ResetUsage(ctx context.Context, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sub, ok := s.subscriptions[userID]
+	if !ok {
+		return fmt.Errorf("subscription not found for user %s", userID)
+	}
+	sub.Usage = 0
+	return nil
+}
+
 func main() {
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
@@ -124,11 +136,39 @@ func main() {
 
 	fmt.Printf("User %s usage: %d/%d\n", userID, sub.Usage, 5)
 
-	// 8. Wait for the subscription to expire.
-	fmt.Println("Waiting for subscription to expire...")
+	// 8. Test subscription modifications
+	fmt.Println("\n=== Testing Subscription Modifications ===")
+	
+	// Test quota update
+	err = manager.UpdateSubscriptionQuota(appCtx, userID, 10)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Updated quota to 10")
+	
+	// Test usage reset
+	err = manager.ResetUsage(appCtx, userID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Reset usage counter")
+	
+	// Test extend subscription
+	err = manager.ExtendSubscription(appCtx, userID, 10*time.Second)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Extended subscription by 10 seconds")
+	
+	// Verify changes
+	sub, _ = manager.GetSubscription(appCtx, userID)
+	fmt.Printf("After modifications - Usage: %d, Quota: %d\n", sub.Usage, sub.Quota)
+
+	// 9. Wait for the subscription to expire.
+	fmt.Println("\nWaiting for subscription to expire...")
 	time.Sleep(6 * time.Second)
 
-	// 9. Try to get a limiter for the user again.
+	// 10. Try to get a limiter for the user again.
 	_, err = manager.GetLimiter(appCtx, userID)
 	if err != nil {
 		fmt.Printf("Successfully blocked user after subscription expired: %v\n", err)
